@@ -1,7 +1,7 @@
 // app/api/auth/x/start/route.ts
 import { NextResponse } from "next/server";
 
-/** Generate a random URL-safe string for PKCE/state */
+/** random url-safe chars for PKCE/state */
 function randomString(length = 64) {
   const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   const arr = crypto.getRandomValues(new Uint8Array(length));
@@ -14,11 +14,20 @@ function toUint8Array(str: string) {
   return new TextEncoder().encode(str);
 }
 
+/** base64url encode with Node fallback */
 function base64urlEncode(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
+  // convert to binary string
   let binary = "";
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  // btoa exists in Edge / browser; fallback to Buffer in Node
+  if (typeof btoa === "function") {
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } else {
+    // Node: use Buffer
+    return Buffer.from(bytes).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
 }
 
 export async function GET() {
@@ -32,15 +41,15 @@ export async function GET() {
       return new NextResponse("OAuth configuration missing", { status: 500 });
     }
 
-    // 1) generate PKCE verifier and challenge
+    // generate PKCE verifier & challenge
     const codeVerifier = randomString(64);
     const digest = await crypto.subtle.digest("SHA-256", toUint8Array(codeVerifier));
     const codeChallenge = base64urlEncode(digest);
 
-    // 2) state
+    // state
     const state = randomString(32);
 
-    // 3) build OAuth URL (match the params used in your callback route)
+    // Build OAuth URL
     const oauthUrl = new URL(authorizeUrl);
     oauthUrl.searchParams.set("response_type", "code");
     oauthUrl.searchParams.set("client_id", clientId);
@@ -50,22 +59,28 @@ export async function GET() {
     oauthUrl.searchParams.set("code_challenge", codeChallenge);
     oauthUrl.searchParams.set("code_challenge_method", "S256");
 
-    // 4) save PKCE object in cookie as encoded JSON (HttpOnly)
+    // Save PKCE as URL-encoded JSON value
     const pkce = encodeURIComponent(JSON.stringify({ codeVerifier, state, createdAt: Date.now() }));
 
+    // Create redirect response and set cookie via cookies API
     const res = NextResponse.redirect(oauthUrl.toString());
 
-    // Build cookie with secure flags. Keep HttpOnly so client JS can't read it.
-    const cookieParts = [
-      `x_pkce=${pkce}`,
-      `Path=/`,
-      `HttpOnly`,
-      `Max-Age=${process.env.X_PKCE_MAX_AGE || 300}`, // default 300 seconds
-      `SameSite=${process.env.X_PKCE_SAMESITE || "Lax"}`,
-      process.env.NODE_ENV === "production" ? "Secure" : "",
-    ].filter(Boolean);
+    // cookie options
+    const maxAge = Number(process.env.X_PKCE_MAX_AGE || 300); // seconds
+    const sameSite = (process.env.X_PKCE_SAMESITE as "lax" | "strict" | "none") || "lax";
+    const secure = process.env.NODE_ENV === "production";
 
-    res.headers.set("Set-Cookie", cookieParts.join("; "));
+    // Use NextResponse cookies API so attributes are correct and consistent
+    // Note: httpOnly must be true so client JS cannot read it
+    res.cookies.set({
+      name: "x_pkce",
+      value: pkce,
+      path: "/",
+      httpOnly: true,
+      maxAge,
+      sameSite,
+      secure,
+    });
 
     return res;
   } catch (err) {
