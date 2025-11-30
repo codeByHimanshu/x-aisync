@@ -1,6 +1,9 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import PostTweetForm from "@/components/PostTweetForm";
+import RecentTweets from "@/components/RecentTweets";
+import SchedulerForm from "@/components/SchedulerForm";
+import SchedulerManager from "@/components/SchedulerManager";
 
 type RecentItem = {
   title: string;
@@ -26,6 +29,7 @@ type User = {
   lastActive?: string;
   stats?: Stats;
   recent?: RecentItem[];
+  postingPreferences?: any;
 };
 
 export default function DashboardPage(): React.ReactElement {
@@ -33,6 +37,7 @@ export default function DashboardPage(): React.ReactElement {
   const [loading, setLoading] = useState<boolean>(true);
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
+  const [refreshScheduledTrigger, setRefreshScheduledTrigger] = useState<number>(0);
 
   useEffect(() => {
     let mounted = true;
@@ -64,7 +69,7 @@ export default function DashboardPage(): React.ReactElement {
 
   async function handleLogout(): Promise<void> {
     try {
-      await fetch("/api/auth/x/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST" });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error(e);
@@ -97,7 +102,6 @@ export default function DashboardPage(): React.ReactElement {
 
   if (loading) return <div className="p-8">Loading…</div>;
 
-  // Defensive fallback: redirect if somehow reached without a user
   if (!user) {
     if (typeof window !== "undefined") window.location.href = "/api/auth/x/start";
     return <div />;
@@ -116,6 +120,11 @@ export default function DashboardPage(): React.ReactElement {
       </div>
     );
   };
+
+  // helper to trigger refresh of scheduler manager (passed to SchedulerForm)
+  function onScheduledCreated() {
+    setRefreshScheduledTrigger((s) => s + 1);
+  }
 
   return (
     <div className="p-6 min-h-screen mx-auto bg-gradient from-indigo-50 via-white to-pink-50">
@@ -150,17 +159,11 @@ export default function DashboardPage(): React.ReactElement {
               <a href="/profile" className="block px-4 py-3 text-sm hover:bg-gray-50">
                 Profile
               </a>
-              <a href="/billing" className="block px-4 py-3 text-sm hover:bg-gray-50">
-                Billing
-              </a>
-              <a href="/app" className="block px-4 py-3 text-sm hover:bg-gray-50">
-                App
-              </a>
               <a href="/settings" className="block px-4 py-3 text-sm hover:bg-gray-50">
                 Settings
               </a>
-              <a href="/settings/security" className="block px-4 py-3 text-sm hover:bg-gray-50">
-                Security
+              <a href="/help" className="block px-4 py-3 text-sm hover:bg-gray-50">
+                Help
               </a>
               <button
                 onClick={handleLogout}
@@ -182,6 +185,7 @@ export default function DashboardPage(): React.ReactElement {
       </header>
 
       <main className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Left column: profile + scheduler form + stats */}
         <section className="lg:col-span-1 space-y-4">
           <div className="p-6 rounded-2xl bg-linear-to-br from-white to-indigo-50 border shadow">
             <div className="flex items-center gap-4">
@@ -204,40 +208,50 @@ export default function DashboardPage(): React.ReactElement {
               </div>
             </div>
           </div>
+
+          {/* Scheduler form: schedule a new post (AI or manual) */}
+          <div className="p-4 rounded-2xl bg-white border shadow">
+            <h3 className="text-sm font-medium mb-2">Schedule a Tweet</h3>
+            <SchedulerForm onCreated={onScheduledCreated} />
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-1 gap-3 mt-2">
+            <Stat label="Posts" value={user.stats?.posts ?? 0} />
+            <Stat label="Followers" value={user.stats?.followers ?? 0} />
+            <Stat label="Likes" value={user.stats?.likes ?? 0} />
+          </div>
         </section>
 
-        {/* Right column: composer + recent + stats */}
+        {/* Right column: composer, recent tweets, scheduler manager */}
         <section className="lg:col-span-3 mt-0 space-y-6">
           {/* Composer */}
           <div className="p-4 rounded-2xl bg-white border shadow">
             <PostTweetForm />
           </div>
 
-          {/* Recent activity */}
+          {/* Recent tweets */}
           <div className="p-4 rounded-2xl bg-white border shadow">
             <h3 className="font-medium text-gray-800">Recent activity</h3>
-            <div className="mt-3 space-y-3 text-sm text-gray-700">
-              {user.recent && user.recent.length > 0 ? (
-                user.recent.map((r: RecentItem, i: number) => (
-                  <div key={i} className="flex items-start gap-3">
-                    <div className="w-2 h-2 rounded-full mt-2 bg-indigo-300/80" />
-                    <div>
-                      <div className="text-sm font-medium">{r.title}</div>
-                      <div className="text-xs text-gray-500">{new Date(r.date).toLocaleString()}</div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-gray-500">No recent activity</div>
-              )}
+            <div className="mt-3">
+              <RecentTweets />
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Stat label="Posts" value={user.stats?.posts ?? 0} />
-            <Stat label="Followers" value={user.stats?.followers ?? 0} />
-            <Stat label="Likes" value={user.stats?.likes ?? 0} />
+          {/* Scheduler Manager (7-day view + list) */}
+          <div className="p-4 rounded-2xl bg-white border shadow">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-gray-800">Scheduled Posts</h3>
+              <button
+                onClick={() => setRefreshScheduledTrigger((n) => n + 1)}
+                className="text-xs px-2 py-1 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {/* Pass a prop that changes when new scheduled posts are created to trigger child refresh if needed */}
+            <SchedulerManager key={refreshScheduledTrigger} />
           </div>
         </section>
       </main>
