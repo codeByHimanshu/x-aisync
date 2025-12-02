@@ -87,7 +87,7 @@ export default function PostTweetForm() {
   }
 
   return (
-    <div className="max-w-2xl w-full bg-white rounded-2xl p-6 shadow-sm">
+    <div className="m w-full bg-white  p-6 ">
       <h2 className="text-lg font-semibold mb-2">Post a Tweet</h2>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
